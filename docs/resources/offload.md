@@ -3,12 +3,16 @@
 page_title: "liqo_offload Resource - liqo"
 subcategory: ""
 description: |-
-  Offload a namespace.
+  Once a given namespace is selected for offloading, `Offload resource` extends
+  it across the cluster boundaries, through the the automatic creation of
+  twin namespaces in the selected remote clusters.
 ---
 
 # liqo_offload (Resource)
 
-Offload a namespace.
+Once a given namespace is selected for offloading, `Offload resource` extends
+it across the cluster boundaries, through the the automatic creation of
+twin namespaces in the selected remote clusters.
 
 
 
@@ -17,20 +21,20 @@ Offload a namespace.
 
 ### Required
 
-- `namespace` (String) Offload a namespace.
+- `namespace` (String) Namespace to offload.
 
 ### Optional
 
 - `cluster_selector_terms` (Attributes List) Selectors to restrict the set of remote clusters. (see [below for nested schema](#nestedatt--cluster_selector_terms))
 - `namespace_mapping_strategy` (String) Naming strategy used to create the remote namespace.
-- `pod_offloading_strategy` (String) Namespace to offload.
+- `pod_offloading_strategy` (String) High-level constraints with respect to the pod offloading strategy (e.g., _remote_ vs _local_).
 
 <a id="nestedatt--cluster_selector_terms"></a>
 ### Nested Schema for `cluster_selector_terms`
 
 Optional:
 
-- `match_expressions` (Attributes List) A list of cluster selector. (see [below for nested schema](#nestedatt--cluster_selector_terms--match_expressions))
+- `match_expressions` (Attributes List) A list of cluster selectors. (see [below for nested schema](#nestedatt--cluster_selector_terms--match_expressions))
 
 <a id="nestedatt--cluster_selector_terms--match_expressions"></a>
 ### Nested Schema for `cluster_selector_terms.match_expressions`
