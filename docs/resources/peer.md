@@ -3,12 +3,18 @@
 page_title: "liqo_peer Resource - liqo"
 subcategory: ""
 description: |-
-  Execute peering.
+  It enables a Liqo peering, i.e., a unidirectional resource and service consumption
+  relationship between two Kubernetes clusters, with one cluster (i.e., the
+  consumer) granted the capability to offload tasks in a remote cluster (i.e., the
+  provider), but not vice versa.
 ---
 
 # liqo_peer (Resource)
 
-Execute peering.
+It enables a Liqo peering, i.e., a unidirectional resource and service consumption
+relationship between two Kubernetes clusters, with one cluster (i.e., the
+consumer) granted the capability to offload tasks in a remote cluster (i.e., the
+provider), but not vice versa.
 
 
 
@@ -17,13 +23,13 @@ Execute peering.
 
 ### Required
 
-- `cluster_authurl` (String) Provider authentication url used for peering.
-- `cluster_id` (String) Provider cluster ID used for peering.
-- `cluster_name` (String) Provider cluster name used for peering.
-- `cluster_token` (String) Provider authentication token used for peering.
+- `cluster_authurl` (String) Provider authentication url.
+- `cluster_id` (String) Provider cluster ID.
+- `cluster_name` (String) Provider cluster name.
+- `cluster_token` (String) Provider authentication token.
 
 ### Optional
 
-- `liqo_namespace` (String) Namespace where is Liqo installed in provider cluster.
+- `liqo_namespace` (String) Namespace where Liqo is installed in the provider cluster.
 
 

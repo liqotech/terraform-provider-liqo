@@ -3,12 +3,16 @@
 page_title: "liqo Provider"
 subcategory: ""
 description: |-
-  Interact with Liqo.
+  Liqo provider to enable seamless and secure resource sharing between multiple
+  Kubernetes clusters, creating a single virtual cluster that spans across
+  multiple physical ones.
 ---
 
 # liqo Provider
 
-Interact with Liqo.
+Liqo provider to enable seamless and secure resource sharing between multiple
+Kubernetes clusters, creating a single virtual cluster that spans across
+multiple physical ones.
 
 ## Example Usage
 

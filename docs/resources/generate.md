@@ -3,12 +3,18 @@
 page_title: "liqo_generate Resource - liqo"
 subcategory: ""
 description: |-
-  Generate peering parameters for remote clusters
+  It retrieves the information concerning the local
+  cluster (i.e., authentication endpoint and token, cluster ID, ...) to use
+  on a different cluster to establish an out-of-band outgoing
+  peering towards the local cluster.
 ---
 
 # liqo_generate (Resource)
 
-Generate peering parameters for remote clusters
+It retrieves the information concerning the local
+cluster (i.e., authentication endpoint and token, cluster ID, ...) to use
+on a different cluster to establish an out-of-band outgoing
+peering towards the local cluster.
 
 
 
@@ -17,7 +23,7 @@ Generate peering parameters for remote clusters
 
 ### Optional
 
-- `liqo_namespace` (String) Namespace where is Liqo installed in provider cluster.
+- `liqo_namespace` (String) Namespace where Liqo is installed in provider cluster.
 
 ### Read-Only
 
