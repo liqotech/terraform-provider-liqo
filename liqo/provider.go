@@ -1,3 +1,17 @@
+// Copyright 2019-2025 The Liqo Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Package liqo provides resources and provider methods.
 package liqo
 
@@ -5,16 +19,20 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
+	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	corev1beta1 "github.com/liqotech/liqo/apis/core/v1beta1"
+	networkingv1beta1 "github.com/liqotech/liqo/apis/networking/v1beta1"
+	offloadingv1beta1 "github.com/liqotech/liqo/apis/offloading/v1beta1"
 	"github.com/mitchellh/go-homedir"
 	apimachineryschema "k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -24,19 +42,12 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/kubectl/pkg/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	discoveryv1alpha1 "github.com/liqotech/liqo/apis/discovery/v1alpha1"
-	netv1alpha1 "github.com/liqotech/liqo/apis/net/v1alpha1"
-	offloadingv1alpha1 "github.com/liqotech/liqo/apis/offloading/v1alpha1"
-	sharingv1alpha1 "github.com/liqotech/liqo/apis/sharing/v1alpha1"
-	planmodifier "github.com/liqotech/terraform-provider-liqo/liqo/attribute_plan_modifier"
 )
 
 func init() {
-	utilruntime.Must(discoveryv1alpha1.AddToScheme(scheme.Scheme))
-	utilruntime.Must(netv1alpha1.AddToScheme(scheme.Scheme))
-	utilruntime.Must(offloadingv1alpha1.AddToScheme(scheme.Scheme))
-	utilruntime.Must(sharingv1alpha1.AddToScheme(scheme.Scheme))
+	utilruntime.Must(corev1beta1.AddToScheme(scheme.Scheme))
+	utilruntime.Must(networkingv1beta1.AddToScheme(scheme.Scheme))
+	utilruntime.Must(offloadingv1beta1.AddToScheme(scheme.Scheme))
 }
 
 var (
@@ -52,16 +63,17 @@ type liqoProvider struct {
 }
 
 // CheckParameters method used to check if kubernetes parameters are null.
-func CheckParameters(config *liqoProviderModel) (*clientcmd.ConfigOverrides, *clientcmd.ClientConfigLoadingRules, error) {
+// configureKubernetesClient configures Kubernetes client settings from provider configuration.
+func configureKubernetesClient(kubeConfig *kubeConf) (*clientcmd.ConfigOverrides, *clientcmd.ClientConfigLoadingRules, error) {
 	overrides := &clientcmd.ConfigOverrides{}
 	loader := &clientcmd.ClientConfigLoadingRules{}
 
 	configPaths := []string{}
 
-	if !config.Kubernetes.KubeConfigPath.IsNull() {
-		configPaths = []string{config.Kubernetes.KubeConfigPath.ValueString()}
-	} else if len(config.Kubernetes.KubeConfigPaths) > 0 {
-		for _, configPath := range config.Kubernetes.KubeConfigPaths {
+	if !kubeConfig.KubeConfigPath.IsNull() {
+		configPaths = []string{kubeConfig.KubeConfigPath.ValueString()}
+	} else if len(kubeConfig.KubeConfigPaths) > 0 {
+		for _, configPath := range kubeConfig.KubeConfigPaths {
 			configPaths = append(configPaths, configPath.ValueString())
 		}
 	} else if v := os.Getenv("KubeConfigPaths"); v != "" {
@@ -84,72 +96,72 @@ func CheckParameters(config *liqoProviderModel) (*clientcmd.ConfigOverrides, *cl
 			loader.Precedence = expandedPaths
 		}
 
-		ctxNotOk := config.Kubernetes.KubeCtx.IsNull()
-		authInfoNotOk := config.Kubernetes.KubeCtxAuthInfo.IsNull()
-		clusterNotOk := config.Kubernetes.KubeCtxCluster.IsNull()
+		ctxNotOk := kubeConfig.KubeCtx.IsNull()
+		authInfoNotOk := kubeConfig.KubeCtxAuthInfo.IsNull()
+		clusterNotOk := kubeConfig.KubeCtxCluster.IsNull()
 
 		if ctxNotOk || authInfoNotOk || clusterNotOk {
 			if ctxNotOk {
-				overrides.CurrentContext = config.Kubernetes.KubeCtx.ValueString()
+				overrides.CurrentContext = kubeConfig.KubeCtx.ValueString()
 			}
 
 			overrides.Context = clientcmdapi.Context{}
 			if authInfoNotOk {
-				overrides.Context.AuthInfo = config.Kubernetes.KubeCtxAuthInfo.ValueString()
+				overrides.Context.AuthInfo = kubeConfig.KubeCtxAuthInfo.ValueString()
 			}
 			if clusterNotOk {
-				overrides.Context.Cluster = config.Kubernetes.KubeCtxCluster.ValueString()
+				overrides.Context.Cluster = kubeConfig.KubeCtxCluster.ValueString()
 			}
 		}
 	}
 
-	if !config.Kubernetes.KubeInsecure.IsNull() {
-		overrides.ClusterInfo.InsecureSkipTLSVerify = !config.Kubernetes.KubeInsecure.ValueBool()
+	if !kubeConfig.KubeInsecure.IsNull() {
+		overrides.ClusterInfo.InsecureSkipTLSVerify = !kubeConfig.KubeInsecure.ValueBool()
 	}
-	if !config.Kubernetes.KubeClusterCaCertData.IsNull() {
-		overrides.ClusterInfo.CertificateAuthorityData = bytes.NewBufferString(config.Kubernetes.KubeClusterCaCertData.ValueString()).Bytes()
+	if !kubeConfig.KubeClusterCaCertData.IsNull() {
+		overrides.ClusterInfo.CertificateAuthorityData = bytes.NewBufferString(kubeConfig.KubeClusterCaCertData.ValueString()).Bytes()
 	}
-	if !config.Kubernetes.KubeClientCertData.IsNull() {
-		overrides.AuthInfo.ClientCertificateData = bytes.NewBufferString(config.Kubernetes.KubeClientCertData.ValueString()).Bytes()
+	if !kubeConfig.KubeClientCertData.IsNull() {
+		overrides.AuthInfo.ClientCertificateData = bytes.NewBufferString(kubeConfig.KubeClientCertData.ValueString()).Bytes()
 	}
-	if !config.Kubernetes.KubeHost.IsNull() {
+	if !kubeConfig.KubeHost.IsNull() {
 		hasCA := len(overrides.ClusterInfo.CertificateAuthorityData) != 0
 		hasCert := len(overrides.AuthInfo.ClientCertificateData) != 0
 		defaultTLS := hasCA || hasCert || overrides.ClusterInfo.InsecureSkipTLSVerify
-		host, _, err := rest.DefaultServerURL(config.Kubernetes.KubeHost.ValueString(), "", apimachineryschema.GroupVersion{}, defaultTLS)
+		host, _, err := rest.DefaultServerURL(kubeConfig.KubeHost.ValueString(), "", apimachineryschema.GroupVersion{}, defaultTLS)
 		if err != nil {
 			return nil, nil, err
 		}
 
 		overrides.ClusterInfo.Server = host.String()
 	}
-	if !config.Kubernetes.KubeUser.IsNull() {
-		overrides.AuthInfo.Username = config.Kubernetes.KubeUser.ValueString()
+	if !kubeConfig.KubeUser.IsNull() {
+		overrides.AuthInfo.Username = kubeConfig.KubeUser.ValueString()
 	}
-	if !config.Kubernetes.KubePassword.IsNull() {
-		overrides.AuthInfo.Password = config.Kubernetes.KubePassword.ValueString()
+	if !kubeConfig.KubePassword.IsNull() {
+		overrides.AuthInfo.Password = kubeConfig.KubePassword.ValueString()
 	}
-	if !config.Kubernetes.KubeClientKeyData.IsNull() {
-		overrides.AuthInfo.ClientKeyData = bytes.NewBufferString(config.Kubernetes.KubeClientKeyData.ValueString()).Bytes()
+	if !kubeConfig.KubeClientKeyData.IsNull() {
+		overrides.AuthInfo.ClientKeyData = bytes.NewBufferString(kubeConfig.KubeClientKeyData.ValueString()).Bytes()
 	}
-	if !config.Kubernetes.KubeToken.IsNull() {
-		overrides.AuthInfo.Token = config.Kubernetes.KubeToken.ValueString()
-	}
-
-	if !config.Kubernetes.KubeProxyURL.IsNull() {
-		overrides.ClusterDefaults.ProxyURL = config.Kubernetes.KubeProxyURL.ValueString()
+	if !kubeConfig.KubeToken.IsNull() {
+		overrides.AuthInfo.Token = kubeConfig.KubeToken.ValueString()
 	}
 
-	if len(config.Kubernetes.KubeExec) > 0 {
+	if !kubeConfig.KubeProxyURL.IsNull() {
+		overrides.ClusterDefaults.ProxyURL = kubeConfig.KubeProxyURL.ValueString()
+	}
+
+	if len(kubeConfig.KubeExec) > 0 {
 		exec := &clientcmdapi.ExecConfig{}
 		exec.InteractiveMode = clientcmdapi.IfAvailableExecInteractiveMode
-		exec.APIVersion = config.Kubernetes.KubeExec[0].APIVersion.ValueString()
-		exec.Command = config.Kubernetes.KubeExec[0].Command.ValueString()
-		for _, arg := range config.Kubernetes.KubeExec[0].Args {
+		exec.APIVersion = kubeConfig.KubeExec[0].APIVersion.ValueString()
+		exec.Command = kubeConfig.KubeExec[0].Command.ValueString()
+		for _, arg := range kubeConfig.KubeExec[0].Args {
 			exec.Args = append(exec.Args, arg.ValueString())
 		}
 
-		for kk, vv := range config.Kubernetes.KubeExec[0].Env.Elements() {
+		for kk, vv := range kubeConfig.KubeExec[0].Env.Elements() {
 			exec.Env = append(exec.Env, clientcmdapi.ExecEnvVar{Name: kk, Value: vv.String()})
 		}
 
@@ -157,6 +169,11 @@ func CheckParameters(config *liqoProviderModel) (*clientcmd.ConfigOverrides, *cl
 	}
 
 	return overrides, loader, nil
+}
+
+// CheckParameters method used to check if kubernetes parameters are null.
+func CheckParameters(config *liqoProviderModel) (*clientcmd.ConfigOverrides, *clientcmd.ClientConfigLoadingRules, error) {
+	return configureKubernetesClient(config.Kubernetes)
 }
 
 // NewClients method to create CRClient and KubeClient.
@@ -192,168 +209,106 @@ func (p *liqoProvider) Metadata(_ context.Context, _ provider.MetadataRequest, r
 	resp.TypeName = "liqo"
 }
 
-func (p *liqoProvider) GetSchema(_ context.Context) (tfsdk.Schema, diag.Diagnostics) {
-	return tfsdk.Schema{
+func (p *liqoProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
+	schemaObj := schema.Schema{
 		Description: "Interact with Liqo.",
-		Attributes: map[string]tfsdk.Attribute{
-			"kubernetes": {
+		Attributes: map[string]schema.Attribute{
+			"liqo_version": schema.StringAttribute{
+				Optional:    true,
+				Description: fmt.Sprintf("The version of Liqo to use for downloading liqoctl binary. Defaults to %s.", LiqoVersion),
+			},
+			"kubernetes": schema.SingleNestedAttribute{
 				Optional: true,
-				Computed: true,
-				Attributes: tfsdk.SingleNestedAttributes(map[string]tfsdk.Attribute{
-					"host": {
-						Type:     types.StringType,
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.StringValue("")),
-						},
+				Attributes: map[string]schema.Attribute{
+					"host": schema.StringAttribute{
+						Optional:    true,
 						Description: "The hostname (in form of URI) of Kubernetes master.",
 					},
-					"username": {
-						Type:     types.StringType,
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.StringValue("")),
-						},
+					"username": schema.StringAttribute{
+						Optional:    true,
 						Description: "The username to use for HTTP basic authentication when accessing the Kubernetes master endpoint.",
 					},
-					"password": {
-						Type:     types.StringType,
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.StringValue("")),
-						},
+					"password": schema.StringAttribute{
+						Optional:    true,
+						Sensitive:   true,
 						Description: "The password to use for HTTP basic authentication when accessing the Kubernetes master endpoint.",
 					},
-					"insecure": {
-						Type:     types.BoolType,
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.BoolValue(false)),
-						},
+					"insecure": schema.BoolAttribute{
+						Optional:    true,
 						Description: "Whether server should be accessed without verifying the TLS certificate.",
 					},
-					"client_certificate": {
-						Type:     types.StringType,
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.StringValue("")),
-						},
+					"client_certificate": schema.StringAttribute{
+						Optional:    true,
 						Description: "PEM-encoded client certificate for TLS authentication.",
 					},
-					"client_key": {
-						Type:     types.StringType,
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.StringValue("")),
-						},
+					"client_key": schema.StringAttribute{
+						Optional:    true,
+						Sensitive:   true,
 						Description: "PEM-encoded client certificate key for TLS authentication.",
 					},
-					"cluster_ca_certificate": {
-						Type:     types.StringType,
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.StringValue("")),
-						},
+					"cluster_ca_certificate": schema.StringAttribute{
+						Optional:    true,
 						Description: "PEM-encoded root certificates bundle for TLS authentication.",
 					},
-					"config_paths": {
-						Type:     types.ListType{ElemType: types.StringType},
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.ListNull(types.StringType)),
-						},
+					"config_paths": schema.ListAttribute{
+						ElementType: types.StringType,
+						Optional:    true,
 					},
-					"config_path": {
-						Type:     types.StringType,
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.StringValue("")),
-						},
+					"config_path": schema.StringAttribute{
+						Optional:    true,
 						Description: "Path to the kube config file. Can be set with KubeConfigPath.",
 					},
-					"config_context": {
-						Type:     types.StringType,
+					"config_context": schema.StringAttribute{
 						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.StringValue("")),
-						},
 					},
-					"config_context_auth_info": {
-						Type:     types.StringType,
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.StringValue("")),
-						},
+					"config_context_auth_info": schema.StringAttribute{
+						Optional:    true,
 						Description: "",
 					},
-					"config_context_cluster": {
-						Type:     types.StringType,
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.StringValue("")),
-						},
+					"config_context_cluster": schema.StringAttribute{
+						Optional:    true,
 						Description: "",
 					},
-					"token": {
-						Type:     types.StringType,
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.StringValue("")),
-						},
+					"token": schema.StringAttribute{
+						Optional:    true,
+						Sensitive:   true,
 						Description: "Token to authenticate an service account",
 					},
-					"proxy_url": {
-						Type:     types.StringType,
-						Optional: true,
-						PlanModifiers: []tfsdk.AttributePlanModifier{
-							planmodifier.DefaultValue(types.StringValue("")),
-						},
+					"proxy_url": schema.StringAttribute{
+						Optional:    true,
 						Description: "URL to the proxy to be used for all API requests",
 					},
-					"exec": {
+					"exec": schema.SingleNestedAttribute{
 						Optional: true,
-						Attributes: tfsdk.SingleNestedAttributes(map[string]tfsdk.Attribute{
-							"api_version": {
-								Type:     types.StringType,
+						Attributes: map[string]schema.Attribute{
+							"api_version": schema.StringAttribute{
 								Required: true,
-								PlanModifiers: []tfsdk.AttributePlanModifier{
-									planmodifier.DefaultValue(types.StringValue("")),
-								},
-								Validators: []tfsdk.AttributeValidator{
+								Validators: []validator.String{
 									stringvalidator.NoneOf("client.authentication.k8s.io/v1alpha1"),
 								},
 							},
-							"command": {
-								Type:     types.StringType,
+							"command": schema.StringAttribute{
 								Required: true,
-								PlanModifiers: []tfsdk.AttributePlanModifier{
-									planmodifier.DefaultValue(types.StringValue("")),
-								},
 							},
-							"env": {
-								Type:     types.MapType{ElemType: types.StringType},
-								Optional: true,
-								PlanModifiers: []tfsdk.AttributePlanModifier{
-									planmodifier.DefaultValue(types.MapNull(types.StringType)),
-								},
+							"env": schema.MapAttribute{
+								ElementType: types.StringType,
+								Optional:    true,
 							},
-							"args": {
-								Type:     types.ListType{ElemType: types.StringType},
-								Optional: true,
-								PlanModifiers: []tfsdk.AttributePlanModifier{
-									planmodifier.DefaultValue(types.ListNull(types.StringType)),
-								},
+							"args": schema.ListAttribute{
+								ElementType: types.StringType,
+								Optional:    true,
 							},
-						}),
+						},
 					},
-				}),
+				},
 			},
 		},
-	}, nil
+	}
+	resp.Schema = schemaObj
 }
 
-// Configure method to create the two kubernetes Clients using parameters passed in the provider instantiation in Terraform main
-// After the creation both Clients will be available in resources and data sources.
+// Configure method to create the kubernetes Client using parameters passed in the provider instantiation in Terraform main
+// After the creation the Client will be available in resources and data sources.
 //
 //nolint:gocritic // Terraform Framework template code
 func (p *liqoProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
@@ -373,7 +328,7 @@ func (p *liqoProvider) DataSources(_ context.Context) []func() datasource.DataSo
 
 func (p *liqoProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewPeerResource, NewGenerateResource, NewOffloadResource,
+		NewPeerResource, NewOffloadResource,
 	}
 }
 
@@ -403,5 +358,6 @@ type kubeConf struct {
 }
 
 type liqoProviderModel struct {
-	Kubernetes *kubeConf `tfsdk:"kubernetes"`
+	LiqoVersion types.String `tfsdk:"liqo_version"`
+	Kubernetes  *kubeConf    `tfsdk:"kubernetes"`
 }

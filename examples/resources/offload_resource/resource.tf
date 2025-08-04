@@ -1,6 +1,5 @@
-# 
+# Offload a namespace to a remote cluster
 resource "liqo_offload" "offload" {
-
   namespace                  = "liqo-demo"
   pod_offloading_strategy    = "LocalAndRemote"
   namespace_mapping_strategy = "DefaultName"
@@ -15,5 +14,4 @@ resource "liqo_offload" "offload" {
       ]
     }
   ]
-
 }
