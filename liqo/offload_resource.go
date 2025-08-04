@@ -1,20 +1,31 @@
+// Copyright 2019-2025 The Liqo Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package liqo
 
 import (
 	"context"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	offloadingv1beta1 "github.com/liqotech/liqo/apis/offloading/v1beta1"
+	"github.com/liqotech/liqo/pkg/consts"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
-	offloadingv1alpha1 "github.com/liqotech/liqo/apis/offloading/v1alpha1"
-	"github.com/liqotech/liqo/pkg/consts"
-	planmodifier "github.com/liqotech/terraform-provider-liqo/liqo/attribute_plan_modifier"
 )
 
 var (
@@ -35,63 +46,56 @@ func (o *offloadResource) Metadata(_ context.Context, req resource.MetadataReque
 	resp.TypeName = req.ProviderTypeName + "_offload"
 }
 
-func (o *offloadResource) GetSchema(_ context.Context) (tfsdk.Schema, diag.Diagnostics) {
-	return tfsdk.Schema{
+func (o *offloadResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		Description: "Offload a namespace.",
-		Attributes: map[string]tfsdk.Attribute{
-			"namespace": {
-				Type:        types.StringType,
+		Attributes: map[string]schema.Attribute{
+			"namespace": schema.StringAttribute{
 				Required:    true,
 				Description: "Offload a namespace.",
 			},
-			"pod_offloading_strategy": {
-				Type:     types.StringType,
-				Optional: true,
-				PlanModifiers: []tfsdk.AttributePlanModifier{
-					planmodifier.DefaultValue(types.StringValue("LocalAndRemote")),
-				},
+			"pod_offloading_strategy": schema.StringAttribute{
+				Optional:    true,
 				Computed:    true,
 				Description: "Namespace to offload.",
 			},
-			"namespace_mapping_strategy": {
-				Type:     types.StringType,
-				Optional: true,
-				PlanModifiers: []tfsdk.AttributePlanModifier{
-					planmodifier.DefaultValue(types.StringValue("DefaultName")),
-				},
+			"namespace_mapping_strategy": schema.StringAttribute{
+				Optional:    true,
 				Computed:    true,
 				Description: "Naming strategy used to create the remote namespace.",
 			},
-			"cluster_selector_terms": {
+			"cluster_selector_terms": schema.ListNestedAttribute{
 				Optional: true,
-				Attributes: tfsdk.ListNestedAttributes(map[string]tfsdk.Attribute{
-					"match_expressions": {
-						Optional: true,
-						Computed: true,
-						Attributes: tfsdk.ListNestedAttributes(map[string]tfsdk.Attribute{
-							"key": {
-								Type:        types.StringType,
-								Required:    true,
-								Description: " The label key that the selector applies to.",
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"match_expressions": schema.ListNestedAttribute{
+							Optional: true,
+							Computed: true,
+							NestedObject: schema.NestedAttributeObject{
+								Attributes: map[string]schema.Attribute{
+									"key": schema.StringAttribute{
+										Required:    true,
+										Description: " The label key that the selector applies to.",
+									},
+									"operator": schema.StringAttribute{
+										Required:    true,
+										Description: "Represents a key's relationship to a set of values.",
+									},
+									"values": schema.ListAttribute{
+										ElementType: types.StringType,
+										Optional:    true,
+										Description: "An array of string values.",
+									},
+								},
 							},
-							"operator": {
-								Type:        types.StringType,
-								Required:    true,
-								Description: "Represents a key's relationship to a set of values.",
-							},
-							"values": {
-								Type:        types.ListType{ElemType: types.StringType},
-								Optional:    true,
-								Description: "An array of string values.",
-							},
-						}),
-						Description: "A list of cluster selector.",
+							Description: "A list of cluster selector.",
+						},
 					},
-				}),
+				},
 				Description: "Selectors to restrict the set of remote clusters.",
 			},
 		},
-	}, nil
+	}
 }
 
 // Creation of Offload Resource to offload a specific namespace,
@@ -166,12 +170,12 @@ func (o *offloadResource) Create(ctx context.Context, req resource.CreateRequest
 		terms = append(terms, corev1.NodeSelectorTerm{MatchExpressions: requirements})
 	}
 
-	nsoff := &offloadingv1alpha1.NamespaceOffloading{ObjectMeta: metav1.ObjectMeta{
+	nsoff := &offloadingv1beta1.NamespaceOffloading{ObjectMeta: metav1.ObjectMeta{
 		Name: consts.DefaultNamespaceOffloadingName, Namespace: plan.Namespace.ValueString()}}
 
 	_, err = controllerutil.CreateOrUpdate(ctx, CRClient, nsoff, func() error {
-		nsoff.Spec.PodOffloadingStrategy = offloadingv1alpha1.PodOffloadingStrategyType(plan.PodOffloadingStrategy.ValueString())
-		nsoff.Spec.NamespaceMappingStrategy = offloadingv1alpha1.NamespaceMappingStrategyType(plan.NamespaceMappingStrategy.ValueString())
+		nsoff.Spec.PodOffloadingStrategy = offloadingv1beta1.PodOffloadingStrategyType(plan.PodOffloadingStrategy.ValueString())
+		nsoff.Spec.NamespaceMappingStrategy = offloadingv1beta1.NamespaceMappingStrategyType(plan.NamespaceMappingStrategy.ValueString())
 		nsoff.Spec.ClusterSelector = corev1.NodeSelector{NodeSelectorTerms: terms}
 		return nil
 	})
@@ -208,7 +212,7 @@ func (o *offloadResource) Read(ctx context.Context, req resource.ReadRequest, re
 }
 
 //nolint:gocritic // Terraform Framework template code
-func (o *offloadResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+func (o *offloadResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
 	resp.Diagnostics.AddError(
 		"Unable to Update Resource",
 		"Update is not supported/permitted yet.",
@@ -238,7 +242,7 @@ func (o *offloadResource) Delete(ctx context.Context, req resource.DeleteRequest
 		return
 	}
 
-	nsoff := &offloadingv1alpha1.NamespaceOffloading{ObjectMeta: metav1.ObjectMeta{
+	nsoff := &offloadingv1beta1.NamespaceOffloading{ObjectMeta: metav1.ObjectMeta{
 		Name: consts.DefaultNamespaceOffloadingName, Namespace: data.Namespace.ValueString()}}
 	if err := CRClient.Delete(ctx, nsoff); client.IgnoreNotFound(err) != nil {
 		resp.Diagnostics.AddError(
@@ -250,7 +254,7 @@ func (o *offloadResource) Delete(ctx context.Context, req resource.DeleteRequest
 }
 
 // Configure method to obtain kubernetes Clients provided by provider.
-func (o *offloadResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (o *offloadResource) Configure(_ context.Context, req resource.ConfigureRequest, _ *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}

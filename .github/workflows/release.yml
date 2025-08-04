@@ -23,9 +23,11 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
           go-version-file: 'go.mod'
           cache: true
+      - name: Generate version constants
+        run: go generate ./liqo
       - name: Import GPG key
         uses: crazy-max/ghaction-import-gpg@v5
         id: import_gpg
