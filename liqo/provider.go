@@ -96,20 +96,18 @@ func configureKubernetesClient(kubeConfig *kubeConf) (*clientcmd.ConfigOverrides
 			loader.Precedence = expandedPaths
 		}
 
-		ctxNotOk := kubeConfig.KubeCtx.IsNull()
-		authInfoNotOk := kubeConfig.KubeCtxAuthInfo.IsNull()
-		clusterNotOk := kubeConfig.KubeCtxCluster.IsNull()
+		// Set context if specified
+		if !kubeConfig.KubeCtx.IsNull() {
+			overrides.CurrentContext = kubeConfig.KubeCtx.ValueString()
+		}
 
-		if ctxNotOk || authInfoNotOk || clusterNotOk {
-			if ctxNotOk {
-				overrides.CurrentContext = kubeConfig.KubeCtx.ValueString()
-			}
-
+		// Set context-specific overrides if specified
+		if !kubeConfig.KubeCtxAuthInfo.IsNull() || !kubeConfig.KubeCtxCluster.IsNull() {
 			overrides.Context = clientcmdapi.Context{}
-			if authInfoNotOk {
+			if !kubeConfig.KubeCtxAuthInfo.IsNull() {
 				overrides.Context.AuthInfo = kubeConfig.KubeCtxAuthInfo.ValueString()
 			}
-			if clusterNotOk {
+			if !kubeConfig.KubeCtxCluster.IsNull() {
 				overrides.Context.Cluster = kubeConfig.KubeCtxCluster.ValueString()
 			}
 		}
@@ -259,15 +257,16 @@ func (p *liqoProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp 
 						Description: "Path to the kube config file. Can be set with KubeConfigPath.",
 					},
 					"config_context": schema.StringAttribute{
-						Optional: true,
+						Optional:    true,
+						Description: "Context to use from the kubeconfig file. If not specified, the current context from the kubeconfig will be used.",
 					},
 					"config_context_auth_info": schema.StringAttribute{
 						Optional:    true,
-						Description: "",
+						Description: "Override the auth info for the context. If not specified, the auth info from the kubeconfig context will be used.",
 					},
 					"config_context_cluster": schema.StringAttribute{
 						Optional:    true,
-						Description: "",
+						Description: "Override the cluster for the context. If not specified, the cluster from the kubeconfig context will be used.",
 					},
 					"token": schema.StringAttribute{
 						Optional:    true,
