@@ -98,37 +98,23 @@ func (o *offloadResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 	}
 }
 
-// Creation of Offload Resource to offload a specific namespace,
-// additionally there is a possibility to select clusters with match_expressione
-// This resource will reproduce the same effect and outputs of "liqoctl offload" command.
-//
-//nolint:gocritic // Terraform Framework template code
-func (o *offloadResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan offloadResourceModel
-	diags := req.Plan.Get(ctx, &plan)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
+// getKubernetesClient creates and returns a Kubernetes client with error handling
+func (o *offloadResource) getKubernetesClient(operation string) (client.Client, error) {
 	overrides, loader, err := CheckParameters(&o.config)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to Create Resource",
-			err.Error(),
-		)
-		return
+		return nil, err
 	}
 
 	CRClient, _, err := NewClients(overrides, loader)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to Create Resource",
-			err.Error(),
-		)
-		return
+		return nil, err
 	}
 
+	return CRClient, nil
+}
+
+// buildClusterSelectorTerms converts the Terraform model cluster selector terms to Kubernetes NodeSelectorTerms
+func (o *offloadResource) buildClusterSelectorTerms(plan *offloadResourceModel) []corev1.NodeSelectorTerm {
 	var clusterSelector [][]metav1.LabelSelectorRequirement
 
 	for _, selector := range plan.ClusterSelectorTerms {
@@ -170,21 +156,48 @@ func (o *offloadResource) Create(ctx context.Context, req resource.CreateRequest
 		terms = append(terms, corev1.NodeSelectorTerm{MatchExpressions: requirements})
 	}
 
+	return terms
+}
+
+// createOrUpdateNamespaceOffloading creates or updates the NamespaceOffloading resource
+func (o *offloadResource) createOrUpdateNamespaceOffloading(ctx context.Context, CRClient client.Client, plan *offloadResourceModel) error {
+	terms := o.buildClusterSelectorTerms(plan)
+
 	nsoff := &offloadingv1beta1.NamespaceOffloading{ObjectMeta: metav1.ObjectMeta{
 		Name: consts.DefaultNamespaceOffloadingName, Namespace: plan.Namespace.ValueString()}}
 
-	_, err = controllerutil.CreateOrUpdate(ctx, CRClient, nsoff, func() error {
+	_, err := controllerutil.CreateOrUpdate(ctx, CRClient, nsoff, func() error {
 		nsoff.Spec.PodOffloadingStrategy = offloadingv1beta1.PodOffloadingStrategyType(plan.PodOffloadingStrategy.ValueString())
 		nsoff.Spec.NamespaceMappingStrategy = offloadingv1beta1.NamespaceMappingStrategyType(plan.NamespaceMappingStrategy.ValueString())
 		nsoff.Spec.ClusterSelector = corev1.NodeSelector{NodeSelectorTerms: terms}
 		return nil
 	})
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to Create Resource",
-			err.Error(),
-		)
 
+	return err
+}
+
+// Creation of Offload Resource to offload a specific namespace,
+// additionally there is a possibility to select clusters with match_expressione
+// This resource will reproduce the same effect and outputs of "liqoctl offload" command.
+//
+//nolint:gocritic // Terraform Framework template code
+func (o *offloadResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan offloadResourceModel
+	diags := req.Plan.Get(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	CRClient, err := o.getKubernetesClient("Unable to Create Resource")
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Create Resource", err.Error())
+		return
+	}
+
+	err = o.createOrUpdateNamespaceOffloading(ctx, CRClient, &plan)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Create Resource", err.Error())
 		return
 	}
 
@@ -212,11 +225,31 @@ func (o *offloadResource) Read(ctx context.Context, req resource.ReadRequest, re
 }
 
 //nolint:gocritic // Terraform Framework template code
-func (o *offloadResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	resp.Diagnostics.AddError(
-		"Unable to Update Resource",
-		"Update is not supported/permitted yet.",
-	)
+func (o *offloadResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan offloadResourceModel
+	diags := req.Plan.Get(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	CRClient, err := o.getKubernetesClient("Unable to Update Resource")
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Update Resource", err.Error())
+		return
+	}
+
+	err = o.createOrUpdateNamespaceOffloading(ctx, CRClient, &plan)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Update Resource", err.Error())
+		return
+	}
+
+	diags = resp.State.Set(ctx, plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 }
 
 //nolint:gocritic // Terraform Framework template code
@@ -224,31 +257,16 @@ func (o *offloadResource) Delete(ctx context.Context, req resource.DeleteRequest
 	var data offloadResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
 
-	overrides, loader, err := CheckParameters(&o.config)
+	CRClient, err := o.getKubernetesClient("Unable to Delete Resource")
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to Delete Resource",
-			err.Error(),
-		)
-		return
-	}
-
-	CRClient, _, err := NewClients(overrides, loader)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to Delete Resource",
-			err.Error(),
-		)
+		resp.Diagnostics.AddError("Unable to Delete Resource", err.Error())
 		return
 	}
 
 	nsoff := &offloadingv1beta1.NamespaceOffloading{ObjectMeta: metav1.ObjectMeta{
 		Name: consts.DefaultNamespaceOffloadingName, Namespace: data.Namespace.ValueString()}}
 	if err := CRClient.Delete(ctx, nsoff); client.IgnoreNotFound(err) != nil {
-		resp.Diagnostics.AddError(
-			"Unable to Delete Resource",
-			err.Error(),
-		)
+		resp.Diagnostics.AddError("Unable to Delete Resource", err.Error())
 		return
 	}
 }
