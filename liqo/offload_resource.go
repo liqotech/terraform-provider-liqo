@@ -98,8 +98,8 @@ func (o *offloadResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 	}
 }
 
-// getKubernetesClient creates and returns a Kubernetes client with error handling
-func (o *offloadResource) getKubernetesClient(operation string) (client.Client, error) {
+// getKubernetesClient creates and returns a Kubernetes client with error handling.
+func (o *offloadResource) getKubernetesClient() (client.Client, error) {
 	overrides, loader, err := CheckParameters(&o.config)
 	if err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ func (o *offloadResource) getKubernetesClient(operation string) (client.Client, 
 	return CRClient, nil
 }
 
-// buildClusterSelectorTerms converts the Terraform model cluster selector terms to Kubernetes NodeSelectorTerms
+// buildClusterSelectorTerms converts the Terraform model cluster selector terms to Kubernetes NodeSelectorTerms.
 func (o *offloadResource) buildClusterSelectorTerms(plan *offloadResourceModel) []corev1.NodeSelectorTerm {
 	var clusterSelector [][]metav1.LabelSelectorRequirement
 
@@ -159,14 +159,14 @@ func (o *offloadResource) buildClusterSelectorTerms(plan *offloadResourceModel) 
 	return terms
 }
 
-// createOrUpdateNamespaceOffloading creates or updates the NamespaceOffloading resource
-func (o *offloadResource) createOrUpdateNamespaceOffloading(ctx context.Context, CRClient client.Client, plan *offloadResourceModel) error {
+// createOrUpdateNamespaceOffloading creates or updates the NamespaceOffloading resource.
+func (o *offloadResource) createOrUpdateNamespaceOffloading(ctx context.Context, crClient client.Client, plan *offloadResourceModel) error {
 	terms := o.buildClusterSelectorTerms(plan)
 
 	nsoff := &offloadingv1beta1.NamespaceOffloading{ObjectMeta: metav1.ObjectMeta{
 		Name: consts.DefaultNamespaceOffloadingName, Namespace: plan.Namespace.ValueString()}}
 
-	_, err := controllerutil.CreateOrUpdate(ctx, CRClient, nsoff, func() error {
+	_, err := controllerutil.CreateOrUpdate(ctx, crClient, nsoff, func() error {
 		nsoff.Spec.PodOffloadingStrategy = offloadingv1beta1.PodOffloadingStrategyType(plan.PodOffloadingStrategy.ValueString())
 		nsoff.Spec.NamespaceMappingStrategy = offloadingv1beta1.NamespaceMappingStrategyType(plan.NamespaceMappingStrategy.ValueString())
 		nsoff.Spec.ClusterSelector = corev1.NodeSelector{NodeSelectorTerms: terms}
@@ -189,7 +189,7 @@ func (o *offloadResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	CRClient, err := o.getKubernetesClient("Unable to Create Resource")
+	CRClient, err := o.getKubernetesClient()
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to Create Resource", err.Error())
 		return
@@ -233,7 +233,7 @@ func (o *offloadResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	CRClient, err := o.getKubernetesClient("Unable to Update Resource")
+	CRClient, err := o.getKubernetesClient()
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to Update Resource", err.Error())
 		return
@@ -257,7 +257,7 @@ func (o *offloadResource) Delete(ctx context.Context, req resource.DeleteRequest
 	var data offloadResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
 
-	CRClient, err := o.getKubernetesClient("Unable to Delete Resource")
+	CRClient, err := o.getKubernetesClient()
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to Delete Resource", err.Error())
 		return
