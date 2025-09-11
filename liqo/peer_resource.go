@@ -188,7 +188,7 @@ func (p *peerResource) Create(ctx context.Context, req resource.CreateRequest, r
 		localKubeconfig = "" // Will use default kubectl behavior
 	}
 
-	// Get context from resource (if specified) or fall back to provider context
+	// Get context from provider config
 	var localContext string
 	if p.config.Kubernetes != nil && !p.config.Kubernetes.KubeCtx.IsNull() {
 		localContext = p.config.Kubernetes.KubeCtx.ValueString()
