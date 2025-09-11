@@ -55,6 +55,10 @@ func (p *peerResource) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 				Required:    true,
 				Description: "Path to the remote (provider) cluster kubeconfig file.",
 			},
+			"remote_context": schema.StringAttribute{
+				Optional:    true,
+				Description: "The context to use for the remote cluster.",
+			},
 
 			// Optional parameters matching liqoctl peer command
 			"timeout": schema.StringAttribute{
@@ -184,6 +188,15 @@ func (p *peerResource) Create(ctx context.Context, req resource.CreateRequest, r
 		localKubeconfig = "" // Will use default kubectl behavior
 	}
 
+	// Get context from resource (if specified) or fall back to provider context
+	var localContext string
+	if p.config.Kubernetes != nil && !p.config.Kubernetes.KubeCtx.IsNull() {
+		localContext = p.config.Kubernetes.KubeCtx.ValueString()
+	} else {
+		// Use default kubecontext location or let kubectl handle it
+		localContext = "" // Will use default kubectl behavior
+	}
+
 	// Download liqoctl if not available
 	liqoctlPath, err := downloadLiqoctl(ctx, p.config)
 	if err != nil {
@@ -195,7 +208,7 @@ func (p *peerResource) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	// Build the liqoctl peer command
-	args := buildPeerCommand(&plan, localKubeconfig)
+	args := buildPeerCommand(&plan, localKubeconfig, localContext)
 
 	// Execute the liqoctl peer command
 	//nolint:gosec // liqoctlPath is validated and args are constructed safely
@@ -218,7 +231,7 @@ func (p *peerResource) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	// Poll for peering status until completion
-	status, err := waitForPeeringCompletion(ctx, liqoctlPath, localKubeconfig, &plan, timeout)
+	status, err := waitForPeeringCompletion(ctx, liqoctlPath, localKubeconfig, localContext, &plan, timeout)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Peering Status Check Failed",
@@ -299,6 +312,15 @@ func (p *peerResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 		localKubeconfig = "" // Will use default kubectl behavior
 	}
 
+	// Get context from provider config
+	var localContext string
+	if p.config.Kubernetes != nil && !p.config.Kubernetes.KubeCtx.IsNull() {
+		localContext = p.config.Kubernetes.KubeCtx.ValueString()
+	} else {
+		// Use default kubecontext location or let kubectl handle it
+		localContext = "" // Will use default kubectl behavior
+	}
+
 	// Download liqoctl if not available
 	liqoctlPath, err := downloadLiqoctl(ctx, p.config)
 	if err != nil {
@@ -310,7 +332,7 @@ func (p *peerResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 	}
 
 	// Build the liqoctl unpeer command
-	args := buildUnpeerCommand(&data, localKubeconfig)
+	args := buildUnpeerCommand(&data, localKubeconfig, localContext)
 
 	// Execute the liqoctl unpeer command
 	//nolint:gosec // liqoctlPath is validated and args are constructed safely
@@ -341,6 +363,7 @@ type peerResourceModel struct {
 	RemoteKubeconfig types.String `tfsdk:"remote_kubeconfig"`
 
 	// Optional parameters matching liqoctl peer command
+	RemoteContext  types.String `tfsdk:"remote_context"`
 	Timeout        types.String `tfsdk:"timeout"`
 	SkipValidation types.Bool   `tfsdk:"skip_validation"`
 
@@ -458,7 +481,7 @@ func downloadLiqoctl(ctx context.Context, config liqoProviderModel) (string, err
 // buildPeerCommand builds the liqoctl peer command arguments based on the resource model.
 //
 //nolint:gocyclo // High complexity due to extensive liqoctl peer command configuration options
-func buildPeerCommand(plan *peerResourceModel, localKubeconfig string) []string {
+func buildPeerCommand(plan *peerResourceModel, localKubeconfig, localContext string) []string {
 	args := []string{"peer"}
 
 	// Add kubeconfig paths
@@ -467,6 +490,14 @@ func buildPeerCommand(plan *peerResourceModel, localKubeconfig string) []string 
 	}
 	if !plan.RemoteKubeconfig.IsNull() && plan.RemoteKubeconfig.ValueString() != "" {
 		args = append(args, "--remote-kubeconfig", plan.RemoteKubeconfig.ValueString())
+	}
+
+	// Add context parameters
+	if localContext != "" {
+		args = append(args, "--context", localContext)
+	}
+	if !plan.RemoteContext.IsNull() && plan.RemoteContext.ValueString() != "" {
+		args = append(args, "--remote-context", plan.RemoteContext.ValueString())
 	}
 
 	// Add timeout
@@ -545,7 +576,7 @@ func buildPeerCommand(plan *peerResourceModel, localKubeconfig string) []string 
 }
 
 // buildUnpeerCommand builds the liqoctl unpeer command arguments based on the resource model.
-func buildUnpeerCommand(data *peerResourceModel, localKubeconfig string) []string {
+func buildUnpeerCommand(data *peerResourceModel, localKubeconfig, localContext string) []string {
 	args := []string{"unpeer"}
 
 	// Add kubeconfig paths
@@ -554,6 +585,14 @@ func buildUnpeerCommand(data *peerResourceModel, localKubeconfig string) []strin
 	}
 	if !data.RemoteKubeconfig.IsNull() && data.RemoteKubeconfig.ValueString() != "" {
 		args = append(args, "--remote-kubeconfig", data.RemoteKubeconfig.ValueString())
+	}
+
+	// Add context parameters
+	if localContext != "" {
+		args = append(args, "--context", localContext)
+	}
+	if !data.RemoteContext.IsNull() && data.RemoteContext.ValueString() != "" {
+		args = append(args, "--remote-context", data.RemoteContext.ValueString())
 	}
 
 	// Add timeout for unpeer (default 120s)

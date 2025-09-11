@@ -1,6 +1,7 @@
 # Initialization of kubernetes clients
 provider "liqo" {
   kubernetes = {
-    config_path = "path/to/kubeconfig"
+    config_path    = "path/to/kubeconfig"
+    config_context = "my-context"
   }
 }

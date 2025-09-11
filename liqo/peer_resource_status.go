@@ -62,6 +62,11 @@ func getRemoteClusterID(ctx context.Context, liqoctlPath, remoteKubeconfig strin
 		args = append(args, "--kubeconfig", remoteKubeconfig)
 	}
 
+	// Add remote context if specified
+	if !plan.RemoteContext.IsNull() && plan.RemoteContext.ValueString() != "" {
+		args = append(args, "--context", plan.RemoteContext.ValueString())
+	}
+
 	// Add remote Liqo namespace if specified
 	if !plan.RemoteLiqoNamespace.IsNull() && plan.RemoteLiqoNamespace.ValueString() != "" {
 		args = append(args, "--namespace", plan.RemoteLiqoNamespace.ValueString())
@@ -88,7 +93,7 @@ func getRemoteClusterID(ctx context.Context, liqoctlPath, remoteKubeconfig strin
 }
 
 // checkPeeringStatus uses liqoctl info to check the status of peering for a specific remote cluster.
-func checkPeeringStatus(ctx context.Context, liqoctlPath, localKubeconfig string, plan *peerResourceModel) (string, error) {
+func checkPeeringStatus(ctx context.Context, liqoctlPath, localKubeconfig, localContext string, plan *peerResourceModel) (string, error) {
 	// Step 1: Get the remote cluster ID
 	remoteClusterID, err := getRemoteClusterID(ctx, liqoctlPath, plan.RemoteKubeconfig.ValueString(), plan)
 	if err != nil {
@@ -105,6 +110,11 @@ func checkPeeringStatus(ctx context.Context, liqoctlPath, localKubeconfig string
 	// Add local kubeconfig if specified
 	if localKubeconfig != "" {
 		args = append(args, "--kubeconfig", localKubeconfig)
+	}
+
+	// Add context if specified
+	if localContext != "" {
+		args = append(args, "--context", localContext)
 	}
 
 	// Add Liqo namespace if specified
@@ -180,7 +190,7 @@ func evaluatePeerStatus(peer *PeerInfo) string {
 // waitForPeeringCompletion polls the peering status until it's ready or fails.
 func waitForPeeringCompletion(
 	ctx context.Context,
-	liqoctlPath, localKubeconfig string,
+	liqoctlPath, localKubeconfig, localContext string,
 	plan *peerResourceModel,
 	timeout time.Duration,
 ) (string, error) {
@@ -191,7 +201,7 @@ func waitForPeeringCompletion(
 	defer ticker.Stop()
 
 	// Initial check
-	status, err := checkPeeringStatus(timeoutCtx, liqoctlPath, localKubeconfig, plan)
+	status, err := checkPeeringStatus(timeoutCtx, liqoctlPath, localKubeconfig, localContext, plan)
 	if err != nil {
 		return status, err
 	}
@@ -204,7 +214,7 @@ func waitForPeeringCompletion(
 		case <-timeoutCtx.Done():
 			return "timeout", fmt.Errorf("timeout waiting for peering completion after %v", timeout)
 		case <-ticker.C:
-			status, err := checkPeeringStatus(timeoutCtx, liqoctlPath, localKubeconfig, plan)
+			status, err := checkPeeringStatus(timeoutCtx, liqoctlPath, localKubeconfig, localContext, plan)
 			if err != nil {
 				// Log error but continue polling unless it's a fatal error
 				if strings.Contains(err.Error(), "failed") || strings.Contains(err.Error(), "error") {
