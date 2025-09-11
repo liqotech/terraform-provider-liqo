@@ -71,13 +71,15 @@ terraform {
 # Configure the Liqo Provider
 provider "liqo" {
   kubernetes = {
-    config_path = "~/.kube/config"
+    config_path    = "~/.kube/config"
+    config_context = "my-local-cluster"  # Optional: specify local cluster context
   }
 }
 
 # Establish a peer relationship
 resource "liqo_peer" "example" {
   remote_kubeconfig = "/path/to/remote/kubeconfig"
+  remote_context    = "my-remote-context"  # Optional: specify remote cluster context
   timeout           = "10m"  # Optional: wait timeout for peering completion
 }
 

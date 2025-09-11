@@ -27,6 +27,7 @@ The `liqo_peer` resource establishes a Liqo peering relationship between two Kub
 ```terraform
 resource "liqo_peer" "example" {
   remote_kubeconfig = "/path/to/remote/kubeconfig"
+  remote_context    = "my-remote-context"
 }
 ```
 
@@ -35,6 +36,7 @@ resource "liqo_peer" "example" {
 ```terraform
 resource "liqo_peer" "advanced" {
   remote_kubeconfig      = "/path/to/staging/kubeconfig"
+  remote_context         = "staging-remote"
   timeout                = "10m"  # Wait up to 10 minutes for peering completion
   liqo_namespace         = "liqo"
   remote_liqo_namespace  = "liqo-system"
@@ -51,6 +53,7 @@ resource "liqo_peer" "advanced" {
 ```terraform
 resource "liqo_peer" "provider" {
   remote_kubeconfig = "/path/to/provider/kubeconfig"
+  remote_context    = "production-remote"
   timeout           = "5m"
 }
 
@@ -90,6 +93,7 @@ If the peering establishment takes longer than the configured timeout:
 
 ### Optional
 
+- `remote_context` (String) The context to use for the remote cluster
 - `timeout` (String) Timeout for peering completion (e.g., '10m')
 - `skip_validation` (Boolean) Skip the validation
 - `liqo_namespace` (String) Namespace where Liqo is installed in local cluster
